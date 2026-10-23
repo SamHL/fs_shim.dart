@@ -63,7 +63,7 @@ class RandomAccessFileIdb
       if (pending.isNotEmpty || close) {
         await flushLock.synchronized(() async {
           if (pending.isNotEmpty || close) {
-            var txn = fsIdb.db!.transactionList([
+            var txn = await storage.startTransactionList([
               treeStoreName,
               partStoreName,
             ], idb.idbModeReadWrite);
@@ -221,7 +221,7 @@ class RandomAccessFileIdb
       accessPosition += count;
       return count;
     } else {
-      var txn = database.writeAllTransactionList();
+      var txn = await storage.startWriteAllTransaction();
 
       var result = await fsIdb.txnReadCheckNodeFileContent(
         txn,
@@ -276,7 +276,7 @@ class RandomAccessFileIdb
         // Keep position
         // await fsIdb.txnWriteNodeFileContent(txn, fileEntity, bytes);
       } else {
-        var txn = database.writeAllTransactionList();
+        var txn = await storage.startWriteAllTransaction();
         var result = await fsIdb.txnReadCheckNodeFileContent(
           txn,
           file,
@@ -377,7 +377,7 @@ class RandomAccessFileIdb
       return _me;
     } else {
       try {
-        txn = fsIdb.writeAllTransactionList();
+        txn = await storage.startWriteAllTransaction();
 
         var result = await fsIdb.txnReadCheckNodeFileContent(
           txn,

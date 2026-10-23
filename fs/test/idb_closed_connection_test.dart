@@ -30,38 +30,37 @@ void main() {
       await file.writeAsBytes(Uint8List.fromList([1, 2, 3]));
     });
 
-    test(
-      'a read fails cleanly instead of escaping and never returning',
-      () async {
-        factory.closeOpenConnections();
-
-        final uncaught = <Object>[];
-        Object? readError;
-        await runZonedGuarded(() async {
-          try {
-            await file.readAsBytes().timeout(const Duration(seconds: 5));
-          } on TimeoutException {
-            rethrow;
-          } catch (e) {
-            readError = e;
-          }
-        }, (error, _) => uncaught.add(error))!;
-
-        expect(uncaught, isEmpty);
-        expect(readError, isA<StateError>());
-      },
-    );
-
-    test('the next operation opens a new connection', () async {
+    test('a read after the connection closes succeeds on a new one', () async {
       factory.closeOpenConnections();
 
-      await expectLater(file.readAsBytes(), throwsA(isA<StateError>()));
+      final uncaught = <Object>[];
+      List<int>? read;
+      await runZonedGuarded(() async {
+        read = await file.readAsBytes().timeout(const Duration(seconds: 5));
+      }, (error, _) => uncaught.add(error))!;
 
-      expect(await file.readAsBytes(), [1, 2, 3]);
+      expect(uncaught, isEmpty);
+      expect(read, [1, 2, 3]);
+      expect(factory.opened, 2);
+    });
+
+    // Looking up a node threw "The database connection is closing" out of
+    // IdbFileSystemStorage.getNode, uncaught, in the HazView web app
+    // (HAZVIEW-1GK).
+    test('every kind of operation recovers on its own', () async {
+      factory.closeOpenConnections();
+      expect(await file.exists(), isTrue);
+
+      factory.closeOpenConnections();
+      expect((await file.stat()).size, 3);
+
+      factory.closeOpenConnections();
+      expect(await fs.directory('/dir').list().toList(), hasLength(1));
+
+      factory.closeOpenConnections();
       final other = fs.file('/dir/other.bin');
       await other.writeAsBytes(Uint8List.fromList([4, 5]));
       expect(await other.readAsBytes(), [4, 5]);
-      expect(factory.opened, 2);
     });
 
     test('an open connection is reused', () async {

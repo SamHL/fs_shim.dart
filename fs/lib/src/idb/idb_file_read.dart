@@ -162,7 +162,7 @@ class IdbReadStreamCtlr {
       idb.Transaction? txn;
       try {
         await _fs.idbReady;
-        txn = _fs.db!.readAllTransactionList();
+        txn = await _fs.storage.startReadAllTransaction();
         var treeStore = txn.objectStore(treeStoreName);
 
         // Try to find the file if it exists

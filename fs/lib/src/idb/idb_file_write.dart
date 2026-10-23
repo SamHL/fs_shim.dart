@@ -135,7 +135,7 @@ class IdbWriteStreamSink extends MemorySink with FileAccessIdbMixin {
       await flush(close: true);
     } else {
       await _openNodeFile();
-      var txn = database.writeAllTransactionList();
+      var txn = await storage.startWriteAllTransaction();
       try {
         var ctlr = TxnWriteStreamSinkIdb(
           file,
@@ -334,7 +334,7 @@ class TxnIdbWriteStreamHelper {
       await flush(close: true);
     } else {
       await _openNodeFile();
-      var txn = _fs.db!.writeAllTransactionList();
+      var txn = await storage.startWriteAllTransaction();
       try {
         var ctlr = TxnWriteStreamSinkIdb(file, txn, fileEntity, mode,
             existingEntity: initialEntity);
@@ -363,7 +363,7 @@ class TxnIdbWriteStreamHelper {
             var result = helper.getStreamParts(
                 bytes: content, position: position, all: all);
             if (result.list.isNotEmpty) {
-              var txn = _fs.db!.transactionList(
+              var txn = await storage.startTransactionList(
                   [treeStoreName, partStoreName], idb.idbModeReadWrite);
               try {
                 fileEntity = await storage.txnUpdateStreamedFileDataV2(
@@ -387,7 +387,7 @@ class TxnIdbWriteStreamHelper {
               if (close) {
                 if (storage.needClearRemainingV2(initialEntity, fileEntity)) {
                   var txn =
-                      _fs.db!.transaction(partStoreName, idb.idbModeReadWrite);
+                      await storage.startTransaction(partStoreName, idb.idbModeReadWrite);
                   try {
                     await storage.txnStoreClearRemainingV2(
                         txn.objectStore(partStoreName), initialEntity, fileEntity);

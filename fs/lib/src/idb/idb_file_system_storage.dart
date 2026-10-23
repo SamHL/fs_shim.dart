@@ -148,6 +148,52 @@ class IdbFileSystemStorage {
     return _readyCompleter!.future;
   }
 
+  /// Starts a transaction once [ready], on a fresh connection if the
+  /// current one turns out to be closed.
+  ///
+  /// The browser can close the connection by itself, and a transaction on it
+  /// then throws `InvalidStateError: The database connection is closing`.
+  /// [_ConnectionWatchingDatabase] drops the dead connection when that
+  /// happens, but the operation that found it still failed, and callers that
+  /// do not await it made that an uncaught error (HAZVIEW-1GK). Trying once
+  /// more on the reopened connection lets that operation succeed.
+  Future<idb.Transaction> startTransaction(
+    Object storeNameOrStoreNames,
+    String mode,
+  ) => _startTransaction(() => db!.transaction(storeNameOrStoreNames, mode));
+
+  /// [startTransaction] for several stores.
+  Future<idb.Transaction> startTransactionList(
+    List<String> storeNames,
+    String mode,
+  ) => _startTransaction(() => db!.transactionList(storeNames, mode));
+
+  /// [startTransaction] on every store, for writing.
+  Future<idb.Transaction> startWriteAllTransaction() =>
+      _startTransaction(() => db!.writeAllTransactionList());
+
+  /// [startTransaction] on every store, for reading.
+  Future<idb.Transaction> startReadAllTransaction() =>
+      _startTransaction(() => db!.readAllTransactionList());
+
+  /// [startTransaction] for opening a file in [mode].
+  Future<idb.Transaction> startNodeTreeTransaction({
+    fs.FileMode mode = fs.FileMode.read,
+  }) => _startTransaction(() => db!.openNodeTreeTransaction(mode: mode));
+
+  Future<idb.Transaction> _startTransaction(
+    idb.Transaction Function() start,
+  ) async {
+    await ready;
+    try {
+      return start();
+    } catch (_) {
+      // The failed start has dropped the connection; [ready] opens another.
+      await ready;
+      return start();
+    }
+  }
+
   /// Called when a transaction could not be started on [closed].
   ///
   /// Starting a transaction fails only once the connection is closed: the
@@ -381,7 +427,7 @@ class IdbFileSystemStorage {
 
   @visibleForTesting
   Future<void> deletePart(FilePartRef ref) async {
-    var txn = db!.transaction(partStoreName, idb.idbModeReadWrite);
+    var txn = await startTransaction(partStoreName, idb.idbModeReadWrite);
     var partStore = txn.objectStore(partStoreName);
     await txnStoreDeletePart(partStore, ref);
     await txn.completed;
@@ -671,8 +717,7 @@ class IdbFileSystemStorage {
   }
 
   Future<Node?> getChildNode(Node? parent, String name, bool followLink) async {
-    await ready;
-    final txn = db!.transaction(treeStoreName, idb.idbModeReadWrite);
+    final txn = await startTransaction(treeStoreName, idb.idbModeReadWrite);
     final store = txn.objectStore(treeStoreName);
     final index = store.index(parentNameIndexName);
 
@@ -726,8 +771,7 @@ class IdbFileSystemStorage {
   }
 
   Future<Node?> getNode(List<String> segments, bool followLastLink) async {
-    await ready;
-    final txn = db!.transaction(treeStoreName, idb.idbModeReadWrite);
+    final txn = await startTransaction(treeStoreName, idb.idbModeReadWrite);
     final store = txn.objectStore(treeStoreName);
 
     final entity = await txnGetNode(store, segments, followLastLink);
@@ -823,8 +867,7 @@ class IdbFileSystemStorage {
     List<String> segments,
     bool followLastLink,
   ) async {
-    await ready;
-    final txn = db!.transaction(treeStoreName, idb.idbModeReadWrite);
+    final txn = await startTransaction(treeStoreName, idb.idbModeReadWrite);
     final store = txn.objectStore(treeStoreName);
 
     final result = await txnSearch(store, segments, followLastLink);
@@ -845,8 +888,7 @@ class IdbFileSystemStorage {
   }
 
   Future<Node> addNode(Node entity) async {
-    await ready;
-    final txn = db!.transaction(treeStoreName, idb.idbModeReadWrite);
+    final txn = await startTransaction(treeStoreName, idb.idbModeReadWrite);
     final store = txn.objectStore(treeStoreName);
 
     await txnAddNode(store, entity);

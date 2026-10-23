@@ -200,7 +200,10 @@ class IdbFileSystem extends Object
     // List<String> segments = getSegments(path);
     final segments = idbPathGetSegments(path);
 
-    final txn = _db!.transaction(treeStoreName, idb.idbModeReadWrite);
+    final txn = await _storage.startTransaction(
+      treeStoreName,
+      idb.idbModeReadWrite,
+    );
     final store = txn.objectStore(treeStoreName);
     try {
       // Try to find the file if it exists
@@ -386,7 +389,10 @@ class IdbFileSystem extends Object
   Future createFile(String path, {bool recursive = false}) async {
     await _ready;
     final segments = getSegments(path);
-    final txn = _db!.transaction(treeStoreName, idb.idbModeReadWrite);
+    final txn = await _storage.startTransaction(
+      treeStoreName,
+      idb.idbModeReadWrite,
+    );
     final store = txn.objectStore(treeStoreName);
     await txnCreateFile(store, segments, recursive: recursive);
     await txn.completed;
@@ -400,7 +406,10 @@ class IdbFileSystem extends Object
     await _ready;
     final segments = getSegments(path);
 
-    final txn = _db!.transaction(treeStoreName, idb.idbModeReadWrite);
+    final txn = await _storage.startTransaction(
+      treeStoreName,
+      idb.idbModeReadWrite,
+    );
     final store = txn.objectStore(treeStoreName);
     await _createLink(store, segments, target, recursive: recursive);
     await txn.completed;
@@ -414,7 +423,7 @@ class IdbFileSystem extends Object
     await _ready;
     final segments = getSegments(path);
 
-    final txn = _db!.writeAllTransactionList();
+    final txn = await _storage.startWriteAllTransaction();
 
     await _delete(txn, type, segments, recursive: recursive);
     await txn.completed;
@@ -525,7 +534,10 @@ class IdbFileSystem extends Object
     await _ready;
     final segments = getSegments(path);
 
-    final txn = _db!.transaction(treeStoreName, idb.idbModeReadOnly);
+    final txn = await _storage.startTransaction(
+      treeStoreName,
+      idb.idbModeReadOnly,
+    );
     try {
       final store = txn.objectStore(treeStoreName);
 
@@ -556,7 +568,7 @@ class IdbFileSystem extends Object
     final segments = getSegments(path);
     final newSegments = getSegments(newPath);
 
-    final txn = _db!.writeAllTransactionList();
+    final txn = await _storage.startWriteAllTransaction();
 
     final store = txn.objectStore(treeStoreName);
 
@@ -639,7 +651,10 @@ class IdbFileSystem extends Object
     await _ready;
     final segments = getSegments(path);
 
-    final txn = _db!.transaction(treeStoreName, idb.idbModeReadOnly);
+    final txn = await _storage.startTransaction(
+      treeStoreName,
+      idb.idbModeReadOnly,
+    );
     final store = txn.objectStore(treeStoreName);
     // TODO check followLink
     final target = txnSearch(store, segments, false)
@@ -662,7 +677,7 @@ class IdbFileSystem extends Object
 
     final modified = DateTime.now();
 
-    final txn = _db!.writeAllTransactionList();
+    final txn = await _storage.startWriteAllTransaction();
     try {
       var store = txn.objectStore(treeStoreName);
 
@@ -808,7 +823,7 @@ class IdbFileSystem extends Object
   /// Open (can create too in write mode), convert if needed
   Future<Node> openNodeFile(File file, {required FileMode mode}) async {
     await idbReady;
-    final txn = storage.db!.openNodeTreeTransaction(mode: mode);
+    final txn = await storage.startNodeTreeTransaction(mode: mode);
 
     var node = await txnOpenNodeFile(txn, file, mode: mode);
 
@@ -928,98 +943,109 @@ class IdbFileSystem extends Object
 
     final ctlr = StreamController<IdbFileSystemEntity>();
 
-    _ready.then((_) {
-      final recursives = <Future>[];
-      final txn = _db!.transaction(treeStoreName, idb.idbModeReadOnly);
-      final treeStore = txn.objectStore(treeStoreName);
-      final index = treeStore.index(parentIndexName);
+    _storage
+        .startTransaction(treeStoreName, idb.idbModeReadOnly)
+        .then(
+          (txn) {
+            final recursives = <Future>[];
+            final treeStore = txn.objectStore(treeStoreName);
+            final index = treeStore.index(parentIndexName);
 
-      // Always follow the parameter if it is a link
-      return txnSearch(treeStore, segments, true)
-          .then((result) {
-            final entity = result.match;
-            if (entity == null) {
-              ctlr.addError(idbNotFoundException(path, 'List failed'));
-            } else {
-              Future list(String path, Node entity) {
-                return index
-                    .openCursor(key: entity.id, autoAdvance: true)
-                    .listen((idb.CursorWithValue cwv) {
-                      // We have a node but the parent might not match!
-                      // So create a fake
-                      final childNode = Node.fromMap(
-                        entity,
-                        (cwv.value as Map).cast<String, Object?>(),
-                        cwv.primaryKey as int,
-                      );
-                      final relativePath = pathContext.join(
-                        path,
-                        childNode.name,
-                      );
-                      if (childNode.isDir) {
-                        final dir = IdbDirectory(this, relativePath);
-                        ctlr.add(dir);
-                        if (recursive) {
-                          recursives.add(list(relativePath, childNode));
-                        }
-                      } else if (childNode.isFile) {
-                        ctlr.add(IdbFile(this, relativePath));
-                        //ctlr.add(nodeToFileSystemEntity(childNode));
-                      } else if (childNode.isLink) {
-                        final link = IdbLink(this, relativePath);
+            // Always follow the parameter if it is a link
+            return txnSearch(treeStore, segments, true)
+                .then((result) {
+                  final entity = result.match;
+                  if (entity == null) {
+                    ctlr.addError(idbNotFoundException(path, 'List failed'));
+                  } else {
+                    Future list(String path, Node entity) {
+                      return index
+                          .openCursor(key: entity.id, autoAdvance: true)
+                          .listen((idb.CursorWithValue cwv) {
+                            // We have a node but the parent might not match!
+                            // So create a fake
+                            final childNode = Node.fromMap(
+                              entity,
+                              (cwv.value as Map).cast<String, Object?>(),
+                              cwv.primaryKey as int,
+                            );
+                            final relativePath = pathContext.join(
+                              path,
+                              childNode.name,
+                            );
+                            if (childNode.isDir) {
+                              final dir = IdbDirectory(this, relativePath);
+                              ctlr.add(dir);
+                              if (recursive) {
+                                recursives.add(list(relativePath, childNode));
+                              }
+                            } else if (childNode.isFile) {
+                              ctlr.add(IdbFile(this, relativePath));
+                              //ctlr.add(nodeToFileSystemEntity(childNode));
+                            } else if (childNode.isLink) {
+                              final link = IdbLink(this, relativePath);
 
-                        if (followLinks) {
-                          recursives.add(
-                            Future.sync(() {
-                              return _storage
-                                  .txnResolveLinkNode(treeStore, childNode)
-                                  .then((entity) {
-                                    if (entity != null) {
-                                      ctlr.add(
-                                        linkNodeToFileSystemEntity(
-                                              relativePath,
-                                              entity,
-                                            )
-                                            as IdbFileSystemEntity,
-                                      );
+                              if (followLinks) {
+                                recursives.add(
+                                  Future.sync(() {
+                                    return _storage
+                                        .txnResolveLinkNode(
+                                          treeStore,
+                                          childNode,
+                                        )
+                                        .then((entity) {
+                                          if (entity != null) {
+                                            ctlr.add(
+                                              linkNodeToFileSystemEntity(
+                                                    relativePath,
+                                                    entity,
+                                                  )
+                                                  as IdbFileSystemEntity,
+                                            );
 
-                                      // recursive?
-                                      if (entity.isDir && recursive) {
-                                        recursives.add(
-                                          list(relativePath, entity),
-                                        );
-                                      }
-                                    } else {
-                                      ctlr.add(link);
-                                    }
-                                  });
-                            }),
-                          );
-                        } else {
-                          ctlr.add(link);
-                        }
-                      } else {
-                        throw UnsupportedError(
-                          'type ${childNode.type} not supported',
-                        );
-                      }
-                    })
-                    .asFuture();
-              }
+                                            // recursive?
+                                            if (entity.isDir && recursive) {
+                                              recursives.add(
+                                                list(relativePath, entity),
+                                              );
+                                            }
+                                          } else {
+                                            ctlr.add(link);
+                                          }
+                                        });
+                                  }),
+                                );
+                              } else {
+                                ctlr.add(link);
+                              }
+                            } else {
+                              throw UnsupportedError(
+                                'type ${childNode.type} not supported',
+                              );
+                            }
+                          })
+                          .asFuture();
+                    }
 
-              return list(path, entity);
-            }
-            return null;
-          })
-          .whenComplete(() async {
-            await txn.completed;
+                    return list(path, entity);
+                  }
+                  return null;
+                })
+                .whenComplete(() async {
+                  await txn.completed;
 
-            // wait after completed to avoid deadlock
-            await Future.wait(recursives);
+                  // wait after completed to avoid deadlock
+                  await Future.wait(recursives);
 
-            await ctlr.close();
-          });
-    });
+                  await ctlr.close();
+                });
+          },
+          onError: (Object e, StackTrace st) {
+            // No transaction could be started, even on a reopened connection.
+            ctlr.addError(e, st);
+            ctlr.close();
+          },
+        );
     return ctlr.stream;
   }
 
